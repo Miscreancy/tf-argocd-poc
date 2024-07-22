@@ -1,0 +1,403 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx
+data:
+  nginx.conf: |
+    load_module /usr/lib/nginx/modules/ngx_stream_js_module.so;
+    load_module /usr/lib/nginx/modules/ndk_http_module.so;
+    load_module /usr/lib/nginx/modules/ngx_http_lua_module.so;
+    load_module /usr/lib/nginx/modules/ngx_stream_lua_module.so;
+
+    env NODE_IP;
+
+    events{
+        worker_connections 32000;
+    }
+    pid /tmp/nginx.pid;
+    worker_processes auto;
+    worker_cpu_affinity auto;
+    pcre_jit on;
+
+    # CQL traffic
+    stream {
+
+        lua_package_path "/etc/nginx/?.lua;;";
+
+        map $ssl_client_s_dn $tenantID {
+            "~^CN\=(client|sla)\.(internal-)?([0-9a-f-]{36})" $3;
+            default                                           00000000-0000-0000-0000-000000000000; # signify invalid cert
+        }
+        map $ssl_client_s_dn $bypassAccessList {
+            "~^CN\=sla\.([0-9a-f-]{36})"        true;  # bypass access list checks for sla-checker
+            default                             false;
+        }
+
+        # Set a default value for pl_endpoint_id to appease nginx variable existence checking, check_access lua sets the real value
+        map default $pl_endpoint_id {
+            default unknown;
+        }
+
+        map default $node_ip {
+            default unknown;
+        }
+
+        map $server_port $traffic_type {
+            29043           privatelink;    # round robin
+            29045           privatelink;    # sni
+            default         default;
+        }
+
+        # Check with OPA that the client address is allowed to communicate with this database
+        preread_by_lua_block {
+            -- todo: fix this and other check_access locations if/when privatelink becomes a feature for classic
+            if ngx.var.bypassAccessList == "true" or ngx.var.traffic_type == "privatelink" then
+              print(ngx.var.tenantID .. ' preread access bypassed')
+            else
+              require("access_list").check_access(ngx.var.tenantID, "cql", nil, ngx.var.traffic_type)
+            end
+
+            ngx.var.node_ip = require("envconfig").get("node_ip")
+        }
+
+        # CQL Traffic
+        map $ssl_server_name$server_port$ssl_client_s_dn $cqlUpstream {
+            "~^([0-9a-f-]{36})(29044|29045)CN\="    c-svc-$1.$tenantID.svc.cluster.local:29044; # sni routing public & pl
+            "~29042CN\="                            $node_ip:29042;                             # round robin public
+            "~29043CN\="                            stargate.$tenantID.svc.cluster.local:29042; # round robin pl
+        }
+
+        map $ssl_server_name$server_port$ssl_client_s_dn $cqlUpstreamAdvanced {
+            "~^([0-9a-f-]{36})(29046|29048)CN\="    c-dse-$1.$tenantID.svc.cluster.local:8182;    # gremlin sni routing
+            "~^([0-9a-f-]{36})(29047|29049)CN\="    c-dse-$1.$tenantID.svc.cluster.local:9042;    # cql graph sni routing
+            "~(29046|29048)CN\="                    caas-cluster-dc-1-service.$tenantID.svc.cluster.local:8182;    # gremlin round robin
+            "~(29047|29049)CN\="                    caas-cluster-dc-1-service.$tenantID.svc.cluster.local:9042;    # cql graph round robin
+        }
+
+        # Round Robin (send proxy proto)
+        server {
+            listen                  29042 ssl so_keepalive=1m:10s:3; # round robin
+            listen                  29043 proxy_protocol ssl so_keepalive=1m:10s:3; # round robin pl
+            resolver                kube-dns.kube-system.svc.cluster.local ipv6=off;
+            proxy_pass              $cqlUpstream;
+            proxy_protocol          on;
+            ssl_certificate         /cql-cert/crt;
+            ssl_certificate_key     /cql-cert/key;
+            ssl_verify_client       on;
+            ssl_client_certificate  /cql-cert/ca;
+        }
+
+        # SNI (don't send proxy proto)
+        server {
+            listen                  29044 ssl so_keepalive=1m:10s:3; # sni
+            listen                  29045 proxy_protocol ssl so_keepalive=1m:10s:3; # sni pl
+            resolver                kube-dns.kube-system.svc.cluster.local ipv6=off;
+            proxy_pass              $cqlUpstream;
+            proxy_protocol          off;
+            ssl_certificate         /cql-cert/crt;
+            ssl_certificate_key     /cql-cert/key;
+            ssl_verify_client       on;
+            ssl_client_certificate  /cql-cert/ca;
+        }
+
+        # Advanced Workloads
+        server {
+            listen                  29046 ssl so_keepalive=1m:10s:3; # gremlin
+            listen                  29047 ssl so_keepalive=1m:10s:3; # graph
+            listen                  29048 ssl so_keepalive=1m:10s:3 proxy_protocol; # gremlin pl
+            listen                  29049 ssl so_keepalive=1m:10s:3 proxy_protocol; # graph pl
+            resolver                kube-dns.kube-system.svc.cluster.local ipv6=off;
+            proxy_pass              $cqlUpstreamAdvanced;
+            ssl_certificate         /cql-cert/crt;
+            ssl_certificate_key     /cql-cert/key;
+            ssl_verify_client       on;
+            ssl_client_certificate  /cql-cert/ca;
+        }
+
+        log_format egress escape=json '{"Tenant": "$tenantID", "Egress_Bytes": $bytes_sent, "Bytes_Received": $bytes_received, "Timestamp": $msec, "Remote_Address": "$remote_addr", "SSL_Server_Name": "$ssl_server_name", "Status": $status, "Session_Time": "$session_time", "Egress_Type": "$traffic_type", "Region": "{{ .Values.region }}", "Provider": "{{ .Values.cloud }}", "Endpoint_ID": "$pl_endpoint_id", "proxy_protocol_addr": "$proxy_protocol_addr", "protocol": "$protocol", "ssl_client_s_dn": "$ssl_client_s_dn", "cqlUpstream": "$cqlUpstream", "server_port": "$server_port", "cqlUpstreamAdvanced": "$cqlUpstreamAdvanced", "TLS_version" : "$ssl_protocol", "TLS_client_ciphers" : "$ssl_ciphers"}';
+        log_format stdout escape=json '{"Tenant": "$tenantID", "Egress_Bytes": $bytes_sent, "Bytes_Received": $bytes_received, "Timestamp": $msec, "Remote_Address": "$remote_addr", "SSL_Server_Name": "$ssl_server_name", "Status": $status, "Session_Time": "$session_time", "Egress_Type": "$traffic_type", "Region": "{{ .Values.region }}", "Provider": "{{ .Values.cloud }}", "Endpoint_ID": "$pl_endpoint_id", "proxy_protocol_addr": "$proxy_protocol_addr", "protocol": "$protocol", "ssl_client_s_dn": "$ssl_client_s_dn", "cqlUpstream": "$cqlUpstream", "server_port": "$server_port", "cqlUpstreamAdvanced": "$cqlUpstreamAdvanced", "TLS_version" : "$ssl_protocol", "TLS_client_ciphers" : "$ssl_ciphers"}';
+        access_log syslog:server=fluent-bit.{{ .Values.clusterID }}.svc.cluster.local egress;
+        access_log /dev/stdout stdout;
+        error_log /dev/stderr info;
+    }
+
+    # HTTP Traffic
+    http{
+        # accept large cookies
+        large_client_header_buffers 4 16k;
+
+        lua_package_path "/etc/nginx/?.lua;;";
+        header_filter_by_lua 'ngx.header["server"] = nil'; # Remove Server header to avoid telling client this is nginx
+
+        map $server_port $traffic_type {
+            444             privatelink;
+            29081           privatelink;
+            default         default;
+        }
+
+        # Set a default value for pl_endpoint_id to appease nginx variable existence checking, check_access lua sets the real value
+        map default $pl_endpoint_id {
+            default unknown;
+        }
+
+        # Default no response
+        server {
+            listen 443 default_server so_keepalive=1m:10s:3;
+            listen 444 default_server so_keepalive=1m:10s:3 proxy_protocol;
+            location / {
+                return 444;
+            }
+            ssl_certificate     /web-cert/crt;
+            ssl_certificate_key /web-cert/key;
+        }
+
+        # Gatekeeper URL
+        map {{ .Values.env }} $gatekeeperDomain {
+            prod    gatekeeper.auth.cloud.datastax.com;
+            default gatekeeper.dev.auth.cloud.datastax.com;
+        }
+
+        # Metadata traffic (keep this http and not stream to lock down path)
+        map $ssl_client_s_dn $tenantID {
+            "~^CN\=(client|sla)\.(internal-)?([0-9a-f-]{36})" $3;
+            default                                           00000000-0000-0000-0000-000000000000; # signify invalid cert
+        }
+        map $ssl_client_s_dn $bypassAccessList {
+            "~^CN\=sla\.([0-9a-f-]{36})"        true;  # bypass access list checks for sla-checker
+            default                             false;
+        }
+        server {
+            listen                  29080 ssl so_keepalive=1m:10s:3;
+            listen                  29081 ssl so_keepalive=1m:10s:3 proxy_protocol;
+            resolver                kube-dns.kube-system.svc.cluster.local;
+            ssl_certificate         /cql-cert/crt;
+            ssl_certificate_key     /cql-cert/key;
+            ssl_verify_client       on;
+            ssl_client_certificate  /cql-cert/ca;
+
+            # Check with OPA that the client address is allowed to communicate with this database
+            access_by_lua_block {
+                if ngx.var.bypassAccessList == "true" or ngx.var.traffic_type == "privatelink" then
+                  print(ngx.var.tenantID .. ' metadata access bypassed')
+                else
+                  require("access_list").check_access(ngx.var.tenantID, "http", ngx.req.get_headers()["X-Datastax-Bypass-AL"], ngx.var.traffic_type)
+                end
+            }
+
+            location = /metadata {
+                proxy_pass          http://cmd-processor.$tenantID.svc.cluster.local:30443/metadata;
+                proxy_set_header    Host $http_host;
+            }
+            location / {
+                return 444; # explicitly deny all other request paths
+            }
+        }
+
+        server {
+            listen                  29082 ssl so_keepalive=1m:10s:3;
+            listen                  29083 ssl so_keepalive=1m:10s:3 proxy_protocol;
+            resolver                kube-dns.kube-system.svc.cluster.local;
+            ssl_certificate         /cql-cert/crt;
+            ssl_certificate_key     /cql-cert/key;
+            ssl_verify_client       on;
+            ssl_client_certificate  /cql-cert/ca;
+
+            # Check with OPA that the client address is allowed to communicate with this database
+            access_by_lua_block {
+                if ngx.var.bypassAccessList == "true" or ngx.var.traffic_type == "privatelink" then
+                  print(ngx.var.tenantID .. ' metadata access bypassed')
+                else
+                  require("access_list").check_access(ngx.var.tenantID, "http", ngx.req.get_headers()["X-Datastax-Bypass-AL"], ngx.var.traffic_type)
+                end
+            }
+
+            location = /metadata {
+                proxy_pass          http://cmd-processor.$tenantID.svc.cluster.local:36443/metadata;
+                proxy_set_header    Host $http_host;
+            }
+            location / {
+                return 444; # explicitly deny all other request paths
+            }
+        }
+
+        # HTTP services traffic
+        # User Dashboard/Grafana
+        map $http_host $namespace { # Determine clusterID / namespace
+            "~^([0-9a-f-]{36})" $1;
+        }
+        server {
+            listen      443 ssl;
+            listen      444 ssl proxy_protocol;
+            resolver    kube-dns.kube-system.svc.cluster.local;
+            server_name ~dashboard\.astra;
+
+            keepalive_requests 1000;
+
+            location / {
+                auth_request     /gatekeeper;
+                auth_request_set $saved_location $upstream_http_location;
+                auth_request_set $saved_cookie $upstream_http_set_cookie;
+                error_page 500 = @loginRedirect; # gatekeeper returns 302, which nginx turns into 500
+
+                # todo: switch to upstream for conn sharing
+                proxy_pass          http://grafana.$namespace.svc.cluster.local:3000;
+                proxy_set_header    X-WEBAUTH-USER $namespace;
+
+                proxy_http_version 1.1;
+                proxy_set_header Connection "";
+            }
+
+            # send request to gatekeeper
+            location = /gatekeeper {
+                internal;
+                proxy_pass              https://$gatekeeperDomain$request_uri;
+                proxy_pass_request_body off;
+                proxy_set_header        Content-Length "";
+                proxy_set_header        Host $host;
+            }
+
+            # If the user is not logged in, redirect them to the uri we got from gatekeeper
+            location @loginRedirect {
+                add_header Set-Cookie $saved_cookie;
+                return 302 $saved_location;
+            }
+        }
+
+        # Apps (WebCQL & Stargate rest/graphql/document)
+        map $request_uri $path_cqlsh {
+            ~^/cqlsh/?(.*)$     $1;
+        }
+        map $request_uri $port_and_path_api {
+            ~^/api/rest/v1/auth(.*)$    8081/v1/auth$1;
+            ~^/api/rest/?(.*)$          8082/$1;
+            ~^/api/playground/?$        8080/playground;
+            ~^/api/graphql(.*)$         8080/graphql$1;
+        }
+        map $http_upgrade $connection_upgrade { # For WebSockets
+            default upgrade;
+            ''      close;
+        }
+        server {
+            listen      443 ssl;
+            listen      444 ssl proxy_protocol;
+            server_name ~apps\.astra;
+            resolver    kube-dns.kube-system.svc.cluster.local;
+
+            keepalive_requests 1000;
+
+            location /cqlsh {
+                auth_request     /gatekeeper;
+                auth_request_set $saved_location $upstream_http_location;
+                auth_request_set $saved_cookie $upstream_http_set_cookie;
+                auth_request_set $auth_jwt $upstream_http_authorization;
+                error_page 500 = @loginRedirect; # gatekeeper returns 302, which nginx turns into 500
+
+                access_by_lua_block {
+                    if ngx.var.traffic_type == "privatelink" then
+                        print(ngx.var.namespace .. ' metadata access bypassed')
+                    else
+                        require("access_list").check_access(ngx.var.namespace, "http", ngx.req.get_headers()["X-Datastax-Bypass-AL"])
+                    end
+                }
+
+                proxy_pass       http://webcql.$namespace.svc.cluster.local:8080/$path_cqlsh;
+
+                # websocket support
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection $connection_upgrade;
+                proxy_set_header Authorization $auth_jwt;
+                proxy_read_timeout 12m; # cqlsh websocket ping defaults to 5m
+            }
+
+            location /api {
+
+                # Check with OPA that the client address is allowed to communicate with this database
+                access_by_lua_block {
+                    if ngx.var.traffic_type == "privatelink" then
+                        print(ngx.var.namespace .. ' metadata access bypassed')
+                    else
+                        require("access_list").check_access(ngx.var.namespace, "http", ngx.req.get_headers()["X-Datastax-Bypass-AL"], ngx.var.traffic_type)
+                    end
+                }
+
+                proxy_pass          http://stargate.$namespace.svc.cluster.local:$port_and_path_api;
+                proxy_set_header    Host $http_host;
+            }
+            location /solr {
+                # Check with OPA that the client address is allowed to communicate with this database
+                access_by_lua_block {
+                    if ngx.var.traffic_type == "privatelink" then
+                        print(ngx.var.namespace .. ' metadata access bypassed')
+                    else
+                        require("access_list").check_access(ngx.var.namespace, "http", ngx.req.get_headers()["X-Datastax-Bypass-AL"], ngx.var.traffic_type)
+                    end
+                }
+                proxy_pass          http://caas-cluster-{{ .Values.dcName }}-service.$namespace.svc.cluster.local:8983$request_uri;
+                proxy_set_header    Host $http_host;
+            }
+
+            location / {
+                return 444; # explicitly deny all other request paths
+            }
+
+            # Gatekeeper auth sub-requests
+            location = /gatekeeper {
+                internal;
+                proxy_pass              https://$gatekeeperDomain$request_uri;
+                proxy_pass_request_body off;
+                proxy_set_header        Content-Length "";
+                proxy_set_header        Host $host;
+            }
+            # If the user is not logged in, redirect them to the uri we got from gatekeeper
+            location @loginRedirect {
+                add_header Set-Cookie $saved_cookie;
+                return 302 $saved_location;
+            }
+        }
+
+        # this is a hack until aks add ext ip support
+        server {
+            listen 1234 default_server so_keepalive=1m:10s:3;
+            location / {
+                proxy_pass http://checkip.amazonaws.com;
+            }
+        }
+
+        log_format egress escape=json '{"Tenant": "{{ .Values.clusterID }}", "Egress_Bytes": $bytes_sent, "Timestamp": $msec, "Request_Url": "http/$request_method/$request_uri", "Remote_Address": "$remote_addr", "Status": $status, "Request_Time": $request_time, "Request_Length": $request_length, "Egress_Type": "$traffic_type", "Region": "{{ .Values.region }}", "Provider": "{{ .Values.cloud }}", "Endpoint_ID": "$pl_endpoint_id", "TLS_version" : "$ssl_protocol", "TLS_client_ciphers" : "$ssl_ciphers"}';
+        log_format stdout escape=json '{"Tenant": "{{ .Values.clusterID }}", "Egress_Bytes": $bytes_sent, "Timestamp": $msec, "Request_Url": "http/$request_method/$request_uri", "Remote_Address": "$remote_addr", "Status": $status, "Request_Time": $request_time, "Request_Length": $request_length, "Egress_Type": "$traffic_type", "Region": "{{ .Values.region }}", "Provider": "{{ .Values.cloud }}", "Endpoint_ID": "$pl_endpoint_id", "TLS_version" : "$ssl_protocol", "TLS_client_ciphers" : "$ssl_ciphers"}';
+        access_log syslog:server=fluent-bit.{{ .Values.clusterID }}.svc.cluster.local egress;
+        access_log /dev/stdout stdout;
+        error_log /dev/stderr info;
+    }
+  # Module for checking access list
+  access_list.lua: |
+    {{ .Files.Get "lib/access_list.lua" | nindent 4 }}
+  # Module for lrucache
+  # Files copied from https://github.com/openresty/lua-resty-lrucache
+  pureffi.lua: |
+    {{ .Files.Get "lib/pureffi.lua" | nindent 4 }}
+  lrucache.lua: |
+    {{ .Files.Get "lib/lrucache.lua" | nindent 4 }}
+  # Module for http client
+  # Files copied from https://github.com/ledgetech/lua-resty-http (with modification to remove "resty." from imports)
+  http.lua: |
+    {{ .Files.Get "lib/http.lua" | nindent 4 }}
+  http_connect.lua: |
+    {{ .Files.Get "lib/http_connect.lua" | nindent 4 }}
+  http_headers.lua: |
+    {{ .Files.Get "lib/http_headers.lua" | nindent 4 }}
+  # Module for json parser
+  # Files copied from https://github.com/rxi/json.lua
+  json.lua: |
+    {{ .Files.Get "lib/json.lua" | nindent 4 }}
+  envconfig.lua: |
+    -- envconfig.lua
+    local _M = {}
+    local data = {
+     node_ip = os.getenv("NODE_IP"),
+    }
+    function _M.get(name)
+     return data[name]
+    end
+    return _M

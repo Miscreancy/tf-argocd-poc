@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.deploymentName }}
+  labels:
+    astra.datastax.com/astra-database-id: {{ .Values.clusterID }}
+    astra.datastax.com/astra-database-version: {{ .Values.astraDatabaseVersion }}
+    app: webcql
+spec:
+  {{ if .Values.stopped }}
+  replicas: 0
+  {{ else }}
+  replicas: {{ .Values.deploymentReplicas }}
+  {{ end }}
+  selector:
+    matchLabels:
+      app: webcql
+  template:
+    metadata:
+      labels:
+        app: webcql
+    spec:
+      automountServiceAccountToken: false    
+      containers:
+      - name: webcql
+        image: {{.Values.image}}
+        imagePullPolicy: {{.Values.imagePullPolicy}}
+        {{ if .Values.resources }}
+        resources:
+        {{- toYaml .Values.resources | nindent 10 }}
+        {{- end }}
+        ports:
+          - name: http
+            containerPort: 8080
+            protocol: TCP
+        env:
+          - name: CQLSH_HOST
+            {{ if and (eq (.Values.enableAdvancedWorkloads | default "false") "true") (eq (.Values.enableAuthAstraDse | default "false") "true") }}
+            value: {{ .Values.host }}
+            {{ else }}
+            value: stargate
+            {{ end }}
+          - name: CQLSH_PORT
+            value: "9042"
+          - name: ENABLE_AUTOLOGIN
+            value: "true"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          periodSeconds: 30
+          timeoutSeconds: 5
+        # readinessProbe:
+        #   httpGet:
+        #     path: /api/health
+        #     port: http
+        volumeMounts:
+        - mountPath: /autologin
+          name: autologin-info
+      volumes:
+      - name: autologin-info
+        secret:
+          secretName: autologin-info
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+        - name: {{.Values.imagePullSecrets}}
+      {{- end }}

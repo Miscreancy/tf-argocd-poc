@@ -1,0 +1,141 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: ingress
+  labels:
+    astra.datastax.com/astra-database-id: {{ .Values.clusterID }}
+    astra.datastax.com/astra-database-version: {{ .Values.astraDatabaseVersion }}
+    app: envoy
+spec:
+  selector:
+    matchLabels:
+      app: envoy
+  template:
+    metadata:
+      labels:
+        app: envoy
+    spec:
+      automountServiceAccountToken: false
+      initContainers:
+      - name: init
+        image: {{ .Values.nginxImage }}
+        command:
+        - /ingress.init.sh
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+          privileged: false
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - NET_ADMIN
+            - NET_RAW
+      containers:
+      - image: {{ .Values.nginxImage }}
+        name: nginx
+        env:
+          - name: REGION
+            value: {{ .Values.region }}
+          - name: NODE_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.hostIP
+        ports:
+        - name: http
+          containerPort: 443
+          hostPort:  {{ .Values.httpPort }}
+        - name: http-pl
+          containerPort: 444
+          hostPort:  {{ .Values.httpPrivateLinkPort }}
+        - name: cql-round-robin
+          containerPort: 29042
+          hostPort: {{ .Values.cqlRoundRobinPort }} # talk to any stargate node
+        - name: round-robin-pl
+          containerPort: 29043
+          hostPort: {{ .Values.cqlRoundRobinPrivateLinkPort }}
+        - name: cql-sni
+          containerPort: 29044
+          hostPort: {{ .Values.cqlSNIPort }} # talk to specific host using IP
+        - name: cql-sni-pl
+          containerPort: 29045
+          hostPort: {{ .Values.cqlSNIPrivateLinkPort }}
+        {{ if eq (.Values.enableAdvancedWorkloads | default "false") "true" -}}
+        - name: gremlin
+          containerPort: 29046
+          hostPort: {{ .Values.gremlinPort }}
+        - name: cql-graph
+          containerPort: 29047
+          hostPort: {{ .Values.cqlGraphPort }}
+        - name: adv-metasvc
+          containerPort: 29082
+          hostPort: {{ .Values.dseMetadataServicePort }}
+        - name: gremlin-pl
+          containerPort: 29048
+        - name: cql-graph-pl
+          containerPort: 29049
+        - name: adv-metasvc-pl
+          containerPort: 29083
+        {{- end }}
+        - name: metadata-svc
+          containerPort: 29080
+          hostPort: {{ .Values.metadataServicePort }}
+        - name: metadata-svc-pl
+          containerPort: 29081
+          hostPort: {{ .Values.metadataServicePrivateLinkPort }}
+        - name: publicip
+          containerPort: 1234
+          hostPort: 1234
+          protocol: TCP
+        volumeMounts:
+        - mountPath: /etc/nginx
+          name: config-vol
+        - mountPath: /cql-cert
+          name: cql-cert
+        - mountPath: /web-cert
+          name: web-cert
+        - mountPath: /var/cache/nginx
+          name: nginx-cache
+        - mountPath: /tmp
+          name: tmpdir
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - |
+              mkdir -p /tmp/etc
+              for item in /cql-cert /web-cert /etc/nginx; do
+                  if ! realpath $item/..data | diff -aqN - /tmp/$item; then
+                      nginx -s reload
+                      realpath $item/..data > /tmp/$item # this marks a successful reload
+                  fi
+              done
+          initialDelaySeconds: 15
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 1
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+          privileged: false
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+      volumes:
+      - name: config-vol
+        configMap:
+          name: nginx
+      - name: cql-cert
+        secret:
+          secretName: cql-cert
+      - name: web-cert
+        secret:
+          secretName: web-cert
+      - name: nginx-cache
+        emptyDir: {}
+      - name: tmpdir
+        emptyDir: {}
+      securityContext:
+        fsGroup: 65534

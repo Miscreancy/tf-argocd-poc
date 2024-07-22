@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: additional-operator-charts
+spec:
+  generators:
+    - matrix:
+        generators:
+          - git:
+              repoURL: https://github.com/miscreancy/tf-argocd-poc.git
+              revision: HEAD
+              directories:
+                - path: argocd/additional-charts/*
+          - clusters:
+              selector:
+                matchLabels:
+                  # only targets clusters with AMC-specific label
+                  astra.datastax.com/astra-managed-clusters: true
+  template:
+    metadata:
+      name: '{{path.basename}}-{{name}}'
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/miscreancy/tf-argocd-poc.git
+        targetRevision: HEAD
+        path: '{{path}}'
+      destination:
+        server: '{{server}}'
+        namespace: '{{path.basename}}'

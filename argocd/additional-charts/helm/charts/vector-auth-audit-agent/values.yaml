@@ -1,0 +1,45 @@
+vector:
+  name: vector-auth-audit-agent
+  labels:  {}
+  vector_source: true
+
+deployment:
+  replicas: 2
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: 10
+  podManagementPolicy: OrderedReady
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+
+volumeClaimTemplate:
+  accessModes: [ "ReadWriteOnce" ]
+  resources:
+    requests:
+      storage: 10Gi
+
+persistence:
+  enabled: false
+  annotations: {}
+
+images:
+  vector:
+    repository: registry.cloud-tools.datastax.com/cloud-services-platform/vector
+    tag: "0.33.0-debian"
+    pullPolicy: IfNotPresent
+  sidecar:
+    repository: registry.cloud-tools.datastax.com/datastax/astra-bases/astra-multiarch-k8s-sidecar
+    tag: 1.26.1.0
+    pullPolicy: Always
+
+resources:
+  limits:
+    cpu: 5000m
+    memory: 5.0Gi
+    ephemeralStorage: 2Gi
+  requests:
+    cpu: 500m
+    memory: 0.5Gi
+
+configBaseDir: /var/tmp

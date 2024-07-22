@@ -1,0 +1,57 @@
+apiVersion: v1
+data:
+  source-config.yaml: |
+    data_dir: /var/lib/vector
+    sources:
+      internal_prometheus:
+        type: internal_metrics
+        scrape_interval_secs: 10
+      {{- if .Values.vector.kafka_source }}{{ include "kafka_source" . | indent 6 }}{{ end }}
+      {{- if .Values.vector.vector_source }}{{ include "vector_source" . | indent 6 }}{{ end }}
+    transforms:
+      parse_json:
+        type: remap
+        inputs: 
+          - audit_input
+        source: |- 
+        {{- if .Values.vector.kafka_source }}
+        {{- include "controlplane_parser" . | nindent 4 -}}
+        {{ end }}
+        {{- if .Values.vector.vector_source }}
+        {{- include "dataplane_parser" . | nindent 4 -}}
+        {{ end }}
+      clean_event:
+        type: remap
+        inputs:
+          - parse_json
+        source: |- 
+{{- if .Values.vector.kafka_source }}{{- include "controlplane_event_cleaner_source" . | indent 4 -}}{{ end }}{{- if .Values.vector.vector_source }}{{- include "dataplane_event_cleaner_source" . | indent 4 -}}{{ end }}
+      structure_audit_log:
+        type: remap
+        inputs:
+          - clean_event
+        source: |- 
+ {{- if .Values.vector.kafka_source }}{{- include "cp_auth_manager_structuring" . | indent 4 -}}{{ end }}{{- if .Values.vector.vector_source }}{{- include "dp_opa_structuring" . | indent 4 -}}{{ end }}
+    sinks:
+      # console_output:
+      #   type: console
+      #   inputs:
+      #     - structure_audit_log
+      #   target: stdout
+      #   encoding: 
+      #     codec: text
+      internal_prometheus_export:
+        type: prometheus_exporter
+        inputs: 
+          - internal_prometheus 
+        address: 0.0.0.0:9598
+    api:
+      enabled: true
+      address: 127.0.0.1:8686
+      playground: true
+kind: ConfigMap
+metadata:
+  labels:
+    vector-auth-audit-sink: '1'
+  name: {{ .Values.vector.name }}
+  namespace: {{ .Release.Namespace }}

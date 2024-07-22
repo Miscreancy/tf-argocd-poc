@@ -1,0 +1,129 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Values.vector.name }}
+  {{- range $key, $value := .Values.vector.labels }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+spec:
+  serviceName: {{ .Values.vector.name }}
+  replicas: {{ .Values.deployment.replicas }} 
+  podManagementPolicy: {{ .Values.deployment.podManagementPolicy }} 
+  revisionHistoryLimit: {{ .Values.deployment.revisionHistoryLimit }}
+  selector:
+    matchLabels:
+      app: {{ .Values.vector.name }}
+  {{- with .Values.deployment.updateStrategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  volumeClaimTemplates:
+  - metadata:
+      name: "{{ .Values.vector.name }}-data"
+    {{- with .Values.persistence.annotations  }}
+      annotations:
+{{ toYaml . | indent 8 }}
+    {{- end }}
+    spec:
+{{ toYaml .Values.volumeClaimTemplate | indent 6 }}
+  template:
+    metadata:
+      creationTimestamp: null
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        prometheus.io/path: /metrics
+        prometheus.io/port: "9598"
+        prometheus.io/scrape: "true"
+      labels:
+        app: {{ .Values.vector.name }}
+    spec:
+      serviceAccountName: {{ .Values.vector.name }}
+      containers:
+        - env:
+            - name: LABEL
+              value: vector-config
+            - name: FOLDER
+              value: {{ .Values.configBaseDir }}/vector
+            - name: RESOURCE
+              value: both
+            - name: NAMESPACE
+              value: {{ .Release.Namespace }}
+            - name: VECTOR_LOG
+              value: debug
+          # We are using a different sidecar that is more resilient to k8s apiserver disconnects. See https://github.com/riptano/cndb/issues/2662
+          image: "{{ .Values.images.sidecar.repository }}:{{ .Values.images.sidecar.tag }}"
+          imagePullPolicy: {{ .Values.images.sidecar.pullPolicy }}
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - sleep
+                  - "30"
+          name: sidecar
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: {{ .Values.configBaseDir }}
+              name: config
+          securityContext:
+            runAsUser: 65534
+            runAsGroup: 65534
+            privileged: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+              - all
+        - args:
+            # - --config
+            # - {{ .Values.configBaseDir }}/vector/*.yaml
+            - --config-dir
+            - {{ .Values.configBaseDir }}/vector
+            - --watch-config
+            #- {{ .Values.configBaseDir }}/vector/*.yaml
+          image: "{{ .Values.images.vector.repository }}:{{ .Values.images.vector.tag }}"
+          imagePullPolicy: {{ .Values.images.vector.pullPolicy }}
+          name: vector-agent
+          ports:
+            - containerPort: 8686
+              name: vector-api
+              protocol: TCP
+            - containerPort: 9090
+              name: remote-write
+              protocol: TCP
+            - containerPort: 9598
+              name: prom-metrics
+              protocol: TCP
+          resources:
+            limits:
+              cpu: {{ .Values.resources.limits.cpu }}
+              memory: {{ .Values.resources.limits.memory }}
+            requests:
+              cpu: {{ .Values.resources.requests.cpu }}
+              memory: {{ .Values.resources.requests.memory }}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - name: config
+              mountPath: {{ .Values.configBaseDir }}
+            - name: "{{ .Values.vector.name }}-data"
+              mountPath: "/var/lib/vector"
+          securityContext:
+            runAsUser: 65534
+            runAsGroup: 65534
+            privileged: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+              - all
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext:
+        fsGroup: 65534
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - emptyDir: {}
+          name: config

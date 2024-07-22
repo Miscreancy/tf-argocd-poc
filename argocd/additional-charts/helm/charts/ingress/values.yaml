@@ -1,0 +1,24 @@
+clusterID: ""
+astraDatabaseVersion: "1.0.0"
+# Pod image
+imagePullPolicy: IfNotPresent
+imagePullSecrets: ""
+deploymentName: envoy
+deploymentReplicas: 3
+useHostPort: true
+env: dev
+httpPort: 443
+httpPrivateLinkPort: 444
+cqlRoundRobinPort: 30042
+cqlRoundRobinPrivateLinkPort: 29043
+cqlSNIPort: 30044
+cqlSNIPrivateLinkPort: 29045
+gremlinPort: 30046
+cqlGraphPort: 30047
+metadataServicePort: 30080
+metadataServicePrivateLinkPort: 29081
+dseMetadataServicePort: 30081
+publicIPPort: 1234
+region: ""
+cloud: ""
+dcName: ""

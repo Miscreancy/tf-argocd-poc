@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fluent-bit
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: fluent-bit
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fluent-bit
+  template:
+    metadata:
+      labels:
+        app: fluent-bit
+    spec:
+      containers:
+        - name: fluent-bit
+          image: fluent/fluent-bit:1.7.1
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: usage-credentials
+                  key: USAGE_BUCKET_ACCESS_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: usage-credentials
+                  key: USAGE_BUCKET_SECRET
+          command:
+            - /fluent-bit/bin/fluent-bit
+            - -c
+            - /fluent-bit/etc/fluent-bit.conf
+          resources:
+            limits:
+              cpu: 100m
+              memory: 100Mi
+            requests:
+              cpu: 100m
+              memory: 100Mi
+          securityContext:
+            runAsUser: 65534
+            runAsGroup: 65534
+            privileged: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+              - all
+          volumeMounts:
+            - name: config
+              mountPath: /fluent-bit/etc/fluent-bit.conf
+              subPath: fluent-bit.conf
+            - name: varlog
+              mountPath: /var/log
+            - name: tmpdir
+              mountPath: /tmp
+      securityContext:
+        fsGroup: 65534
+      terminationGracePeriodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: fluent-bit-config-s3
+        - name: varlog
+          hostPath:
+            path: /var/log
+        - name: tmpdir
+          emptyDir: {}

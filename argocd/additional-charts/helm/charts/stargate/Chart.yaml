@@ -1,0 +1,7 @@
+apiVersion: v2
+name: stargate
+description: Helm chart for github.com/stargate
+
+type: application
+version: 0.1.0
+appVersion: 1.0.0

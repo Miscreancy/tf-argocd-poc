@@ -1,0 +1,130 @@
+imagePullPolicy: IfNotPresent
+replicaCount: 1
+
+# Configure OPA to routinely pull policy bundle through cmd-proc proxy
+opa:
+  services:
+    cmd-processor:
+      url: "http://cmd-processor:30443/opa"
+  bundles:
+    main:
+      service: cmd-processor
+      resource: "bundles/bundle.tar.gz"
+      polling:
+        min_delay_seconds: 5
+        max_delay_seconds: 10
+  decision_logs:
+    console: true
+
+### TODO: Determine sane bootstrap authorization policy ###
+authz:
+  # Disable if you don't want authorization.
+  # Mostly useful for debugging.
+  enabled: false
+### TODO: Determine sane bootstrap authorization policy ###
+
+certManager:
+  enabled: false
+prometheus:
+  enabled: false
+
+# Bootstrap policies to load upon startup
+# Define policies in the form of:
+# <policyName> : |-
+#   <regoBody>
+# For example, to mask the entire input body in the decision logs:
+# bootstrapPolicies:
+#   log: |-
+#     package system.log
+#     mask["/input"]
+bootstrapPolicies: {}
+
+# Use hostNetwork setting on OPA pod
+hostNetwork:
+  enabled: false
+
+# Port to which the opa pod will bind itself
+# NOTE IF you use a different port make sure it maches the ones in the readinessProbe
+# and livenessProbe
+port: 80
+
+readinessProbe:
+  httpGet:
+    path: /health?bundle=true
+    scheme: HTTP
+    port: 80
+  initialDelaySeconds: 3
+  periodSeconds: 30
+livenessProbe:
+  httpGet:
+    path: /health
+    scheme: HTTP
+    port: 80
+  initialDelaySeconds: 3
+  periodSeconds: 5
+
+annotations:
+  prometheus.io/path: /metrics
+  prometheus.io/port: "80"
+  prometheus.io/scrape: "true"
+deploymentStrategy: {}
+imagePullSecrets: []
+extraContainers: []
+extraVolumes: []
+extraPorts: []
+extraArgs: []
+affinity: 
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+    - labelSelector:
+        matchExpressions:
+        - key: app
+          operator: In
+          values:
+          - opa
+      topologyKey: "kubernetes.io/hostname"
+tolerations: []
+nodeSelector: {}
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 100Mi
+  limits:
+    cpu: 300m
+    memory: 300Mi
+
+
+mgmt:
+  enabled: true
+  image: registry.cloud-tools.datastax.com/datastax/astra-bases/astra-kube-mgmt
+  imageTag: "0.10.1"
+  imagePullPolicy: IfNotPresent
+  # NOTE insecure http port conjointly used for mgmt access and prometheus metrics export
+  port: 8181
+  extraArgs: []
+  resources: {}
+  data:
+    enabled: false
+  configmapPolicies:
+    # NOTE IF you use these, remember to update the RBAC rules below to allow
+    #      permissions to get, list, watch, patch and update configmaps
+    enabled: false
+    namespaces: [opa, kube-federation-scheduling-policy]
+    requireLabel: true
+  replicate:
+    # NOTE IF you use these, remember to update the RBAC rules below to allow
+    #      permissions to replicate these things
+    cluster: []
+    #     - [group/]version/resource
+    namespace: []
+    #     - [group/]version/resource
+    path: kubernetes
+
+logLevel: info
+logFormat: json
+
+securityContext:
+  enabled: false
+  runAsNonRoot: true
+  runAsUser: 1

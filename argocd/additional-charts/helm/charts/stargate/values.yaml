@@ -1,0 +1,26 @@
+# Default values for stargate.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+image: ""
+gitHash: ""
+logLevel: ""
+clusterID: ""
+imagePullSecretName: ""
+
+# Kafka CDC producer specific values
+kafkaCDCEnabled: false
+topicPrefixName: "prefix"
+metricsEnabled: true
+producerBootstrapServers: ""
+producerSchemaRegistryUrl: ""
+# By default there is no enabled tables.
+# If you want enable "table1" from keyspace "ks1", change it to
+# cdcEnabledTables:
+#   - "ks1.table"
+cdcEnabledTables: []
+guardrails: "enabled"
+cqlRoundRobinPort: 30042
+cqlSNIPort: 30044
+enableAdvancedWorkloads: "false"

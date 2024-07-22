@@ -1,0 +1,17 @@
+apiVersion: v2
+name: vector-metrics-agent
+# the version number is identical to that of the 3pm setup in serverless, because they share the same setup.
+# the only difference between 3pm serverless and 3pm classic is 3pm classic connects to Prometheus as opposed to 3pm serverless which connects to VictoriaMetrics
+version: 2.4.4
+description: A Helm chart containing Vector.dev agent resources for third-party-metrics classic
+dependencies:
+  - name: victoria-metrics-agent
+    alias: vmagent
+    version: 0.9.11
+    repository: "https://victoriametrics.github.io/helm-charts/"
+  - name: victoria-metrics-alert
+    alias: vmalert
+    version: 0.8.3
+    repository: "https://victoriametrics.github.io/helm-charts/"
+
+

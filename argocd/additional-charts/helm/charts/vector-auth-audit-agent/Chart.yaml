@@ -1,0 +1,4 @@
+apiVersion: v2
+name: vector-auth-audit-agent
+version: 1.0.0
+description: A Helm chart containing Vector.dev agent resources for Auth Manager Audit Logs

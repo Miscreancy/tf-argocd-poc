@@ -1,0 +1,127 @@
+# A minimal cassandra.yaml that reduces resource usage by minimizing DSE
+# functionality that's not used by Stargate.
+
+# The size of the individual commitlog file segments.  A commitlog
+# segment can be archived, deleted, or recycled after all the data
+# in it (potentially from each table in the system) has been
+# flushed to sstables.
+#
+# The default size is 32, which is almost always fine, but if you are
+# archiving commitlog segments (see commitlog_archiving.properties),
+# then you probably want a finer granularity of archiving; 8 or 16 MB
+# is reasonable.
+# Max mutation size is also configurable via max_mutation_size_in_kb setting in
+# cassandra.yaml. When max_mutation_size_in_kb is not set, the calculated default is half the size
+# commitlog_segment_size_in_mb * 1024. This value should be positive and less than 2048.
+#
+# NOTE: If max_mutation_size_in_kb is set explicitly, then commitlog_segment_size_in_mb must
+# be set to at least twice the size of max_mutation_size_in_kb / 1024
+#
+commitlog_segment_size_in_mb: 32
+
+# Maximum memory used for file buffers that are stored in the file cache, also
+# known as the chunk cache. This is used as a cache that holds uncompressed
+# sstable chunks, potentially for a very long time (until the sstable is obsoleted
+# by compaction or until the data is evicted by the cache).
+# When not set, the default is calculated as 1/4  of (system RAM - max heap).
+# This pool is allocated off-heap but the chunk cache also has on-heap overhead
+# which is roughly 120 bytes per entry.
+# Memory is allocated only when needed but is not released.
+# The file (chunk) cache is only created if this value is larger than inflight_data_overhead_in_mb,
+# which by default is 32 MB. Therefore, setting this value to anything less is equivalent to setting it to
+# zero (the buffer pool is created but it will never be used because the chunk cache does not exist)
+file_cache_size_in_mb: 0
+
+# Total permitted memory to use for memtables. The database will stop
+# accepting writes when the limit is exceeded until a flush completes,
+# and will trigger a flush based on memtable_cleanup_threshold
+# If omitted, the calculated value is 1/4 the size of the heap.
+memtable_space_in_mb: 8
+
+# The number of memtable flush writer threads per disk and
+# the total number of memtables that can be flushed concurrently.
+# These are generally a combination of compute and IO bound.
+#
+# Memtable flushing is more CPU efficient than memtable ingest and a single thread
+# can keep up with the ingest rate of a whole server on a single fast disk
+# until it temporarily becomes IO bound under contention typically with compaction.
+# At that point you need multiple flush threads. At some point in the future
+# it may become CPU bound all the time.
+#
+# You can tell if flushing is falling behind using the MemtablePool.BlockedOnAllocation
+# metric, which should be 0. A non-zero metric occurs if threads are blocked waiting on flushing
+# to free memory.
+#
+# memtable_flush_writers defaults to 8, and this means 8 Memtables can be flushed concurrently
+# to a single data directory.
+#
+# There is a direct tradeoff between number of memtables that can be flushed concurrently
+# and flush size and frequency. More is not better you just need enough flush writers
+# to never stall waiting for flushing to free memory.
+#
+memtable_flush_writers: 1
+
+# Whether to enable snapshots of the data before truncating a keyspace or
+# dropping a table. To prevent data loss, DataStax strongly advises using the default
+# setting. If you set auto_snapshot to false, you lose data on truncation or drop.
+auto_snapshot: false
+
+# Number of simultaneous compactions allowed to run simultaneously, NOT including
+# validation "compactions" for anti-entropy repair.  Simultaneous
+# compactions help preserve read performance in a mixed read/write
+# workload by limiting the number of small SSTables that accumulate
+# during a single long running compaction. When not set, the calculated default is usually
+# fine. If you experience problems with compaction running too
+# slowly or too fast, you should first review the
+# compaction_throughput_mb_per_sec option.
+#
+# The calculated default value for concurrent_compactors defaults to the smaller of (number of disks,
+# number of cores), with a minimum of 2 and a maximum of 8.
+#
+# If your data directories are backed by SSD, increase this
+# to the number of cores.
+concurrent_compactors: 1
+
+# Number of simultaneous repair validations to allow. Default is unbounded
+# Values less than one are interpreted as unbounded (the default)
+# concurrent_validations: 0
+
+# Number of simultaneous materialized view builder tasks to allow.
+concurrent_materialized_view_builders: 1
+
+# Throttles compaction to the specified total throughput across the entire
+# system. The faster you insert data, the faster you need to compact in
+# order to keep the SSTable count down. In general, setting this to
+# 16 to 32 times the rate you are inserting data is more than sufficient.
+# Set to 0 to disable throttling. Note that this throughput applies for all types
+# of compaction, including validation compaction.
+compaction_throughput_mb_per_sec: 0
+
+# The size of the SSTables to trigger preemptive opens. The compaction process opens
+# SSTables before they are completely written and uses them in place
+# of the prior SSTables for any range previously written. This process helps
+# to smoothly transfer reads between the SSTables by reducing page cache churn and keeps hot rows hot.
+#
+# Setting this to a low value will negatively affect performance
+# and eventually cause huge heap pressure and a lot of GC activity.
+# The "optimal" value depends on the hardware and workload.
+#
+# Values <= 0 will disable this feature.
+sstable_preemptive_open_interval_in_mb: 0
+
+# NodeSync settings.
+nodesync:
+  enabled: false
+
+# Enable the backup service
+# The backup service allows scheduling of backups and simplified restore procedures
+backup_service:
+    enabled: false
+
+# Disk access mode mmap will potentially block TPC threads but will allow the OS to manage memory required for
+# reading files from disk
+disk_access_mode: mmap
+
+# This disables the periodic background aggregation of metric's histograms
+# It does mean that histograms are aggregated for each read operation
+metrics_histogram_update_interval_millis: 0

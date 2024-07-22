@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: cluster-bootstrap
+spec:
+  generators:
+    - matrix:
+        generators:
+          - git:
+              repoURL: https://github.com/miscreancy/tf-argocd-poc.git
+              revision: HEAD
+              directories:
+                - path: argocd/bootstrap/*
+          - clusters:
+              selector:
+                matchLabels:
+                  # escapes local cluster deploys
+                  argocd.argoproj.io/secret-type: cluster
+  template:
+    metadata:
+      name: '{{path.basename}}-{{name}}'
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/miscreancy/tf-argocd-poc.git
+        targetRevision: HEAD
+        path: '{{path}}'
+      destination:
+        server: '{{server}}'
+        namespace: '{{path.basename}}'

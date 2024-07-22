@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stargate-configmap
+  labels:
+    app: stargate
+data:
+  stargate-config.yaml: |-
+    {{ if .Values.kafkaCDCEnabled }}
+      cdc.kafka:
+        enabled: true
+        topic.prefix-name: "{{.Values.topicPrefixName}}"
+        metrics.enabled: {{.Values.metricsEnabled}}
+        producer.bootstrap.servers: "{{.Values.producerBootstrapServers}}"
+        producer.schema.registry.url: "{{.Values.producerSchemaRegistryUrl}}"
+    {{ end }}
+      cdc.core:
+        {{- if .Values.cdcEnabledTables }}
+        enabledTables:
+          {{- range .Values.cdcEnabledTables }}
+          - {{.}}
+          {{- end }}
+        {{- else }}
+        enabledTables: []
+        {{- end }}
+  cassandra-stargate.yaml: |-
+  {{ if .Values.enableAdvancedWorkloads }}
+{{ .Files.Get "cassandra-stargate-advanced-workloads.yaml" | indent 4}}
+  {{- else }}
+{{ .Files.Get "cassandra-stargate.yaml" | indent 4}}
+  {{- end }}

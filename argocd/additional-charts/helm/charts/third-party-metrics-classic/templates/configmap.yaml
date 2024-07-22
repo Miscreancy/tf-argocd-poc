@@ -1,0 +1,66 @@
+apiVersion: v1
+data:
+  source-config.yaml: |
+    data_dir: /var/lib/vector
+    sources:
+      prom_aggregated_in:
+        type: prometheus_remote_write
+        address: 0.0.0.0:9042
+      internal_prometheus:
+        type: internal_metrics
+        scrape_interval_secs: 10
+    transforms:
+      prom-source:
+        type: remap
+        inputs:
+          - prom_aggregated_in
+        source: |-
+          del(.tags.app_kubernetes_io_component)
+          del(.tags.app_kubernetes_io_instance)
+          del(.tags.app_kubernetes_io_managed_by)
+          del(.tags.app_kubernetes_io_name)
+          del(.tags.app_kubernetes_io_namespace)
+          del(.tags.app_kubernetes_io_part_of)
+          del(.tags.app_kubernetes_io_version)
+          del(.tags.cndb_datastax_com_coordinator_revision)
+          del(.tags.cndb_datastax_com_coordinator_status)
+          del(.tags.container)
+          del(.tags.exported_namespace)
+          del(.tags.instance)
+          del(.tags.job)
+          del(.tags.kubernetes_pod_name)
+          del(.tags.namespace)
+          del(.tags.node_name)
+          del(.tags.pod)
+          del(.tags.pod_name)
+          del(.tags.pod_template_hash)
+          del(.tags.project)
+          del(.tags.prometheus)
+          del(.tags.rack)
+          .tags.cloudProvider = "{{ .Values.cloudProvider }}"
+          .tags.cloudRegion = "{{ .Values.cloudRegion }}"
+    sinks:
+      internal_prometheus_export:
+        type: prometheus_exporter
+        inputs: 
+          - internal_prometheus 
+        address: 0.0.0.0:9598
+    # console sink available to monitor flow of classic metrics
+    #  classic_console_output:
+    #   type: console
+    #   inputs:
+    #     - prom_aggregated_in
+    #   target: stdout
+    #   encoding:
+    #     codec: json
+    api:
+      enabled: true
+      address: 127.0.0.1:8686
+      playground: true
+kind: ConfigMap
+metadata:
+  labels:
+    vector-config: '1'
+  name: {{ .Values.vector.name }}
+  namespace: {{ .Release.Namespace }}
+

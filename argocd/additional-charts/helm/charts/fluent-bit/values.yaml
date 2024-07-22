@@ -1,0 +1,7 @@
+# Default values
+ENV_DSCLOUD_ENVIRONMENT: dev
+region: us-east-2
+logging:
+  enabled: false
+ENV_AWS_ACCESS_KEY_ID: ""
+ENV_AWS_SECRET_ACCESS_KEY: ""

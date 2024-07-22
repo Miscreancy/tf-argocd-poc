@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: webcql
+  labels:
+    astra.datastax.com/astra-database-id: {{ .Values.clusterID }}
+    astra.datastax.com/astra-database-version: {{ .Values.astraDatabaseVersion }}
+    app: webcql
+spec:
+  ports:
+  - name: http
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app: webcql

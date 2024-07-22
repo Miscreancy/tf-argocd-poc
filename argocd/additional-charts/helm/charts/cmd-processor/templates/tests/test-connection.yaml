@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "cmd-processor-test-connection"
+  labels:
+    {{- include "cmd-processor.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test-success
+spec:
+  containers:
+    - name: wget
+      image: registry.cloud-tools.datastax.com/cloud-services-platform/busybox:1.33
+      command: ['wget']
+      args: ['cmd-processor:2020']
+  restartPolicy: Never

@@ -1,0 +1,11 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cmd-processor
+subjects:
+- kind: ServiceAccount
+  name: cmd-processor
+roleRef:
+  kind: Role
+  name: cmd-processor
+  apiGroup: rbac.authorization.k8s.io

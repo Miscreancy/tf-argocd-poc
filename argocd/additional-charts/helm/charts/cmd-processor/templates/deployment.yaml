@@ -1,0 +1,200 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cmd-processor
+  labels:
+    {{- include "cmd-processor.labels" . | nindent 4 }}
+spec:
+  {{ if .Values.stopped }}
+  replicas: 0
+  {{ else }}
+  replicas: {{ .Values.deploymentReplicas }}
+  {{ end }}
+  selector:
+    matchLabels:
+      {{- include "cmd-processor.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cmd-processor.selectorLabels" . | nindent 8 }}
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                - cmd-processor
+            topologyKey: "failure-domain.beta.kubernetes.io/zone"
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range .Values.imagePullSecrets }}
+        - name: {{ . | quote }}
+        {{- end }}
+      {{- end }}
+      serviceAccountName: cmd-processor
+      containers:
+        - name: cmd-processor
+          image: {{ .Values.image }}
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+                cpu: 25m
+                memory: 50Mi
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 2020
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 2020
+          volumeMounts:
+          - mountPath: /etc/certs/mgmt
+            name: management-api-client-certs-volume
+          - mountPath: /certs/web
+            name: web-cert
+          - mountPath: /certs/cql
+            name: cql-cert
+          - name: remote-dcs
+            mountPath: /remote-dcs
+          - name: dse-credentials
+            mountPath: /secrets/dse/username
+            readOnly: true
+            subPath: username
+          - name: dse-credentials
+            mountPath: /secrets/dse/password
+            readOnly: true
+            subPath: password
+          - name: dse-credentials
+            mountPath: /secrets/dse/SLA_USERNAME
+            readOnly: true
+            subPath: SLA_USERNAME
+          - name: dse-credentials
+            mountPath: /secrets/dse/SLA_PASSWORD
+            readOnly: true
+            subPath: SLA_PASSWORD
+          - name: dse-credentials
+            mountPath: /secrets/dse/DATA_ENDPOINT_USERNAME
+            readOnly: true
+            subPath: DATA_ENDPOINT_USERNAME
+          - name: dse-credentials
+            mountPath: /secrets/dse/DATA_ENDPOINT_PASSWORD
+            readOnly: true
+            subPath: DATA_ENDPOINT_PASSWORD
+          - name: sqs-credentials
+            mountPath: /secrets/sqs/AWS_ACCESS_KEY_ID
+            readOnly: true
+            subPath: AWS_ACCESS_KEY_ID
+          - name: sqs-credentials
+            mountPath: /secrets/sqs/AWS_SECRET_ACCESS_KEY
+            readOnly: true
+            subPath: AWS_SECRET_ACCESS_KEY
+          - name: tmpdir
+            mountPath: /tmp
+          env:
+          - name: DSCLOUD_LOG_LEVEL
+            value: "{{ .Values.logLevel }}"
+          - name: DSCLOUD_ENVIRONMENT
+            value: "{{ .Values.env }}"
+          - name: CAAS_VERSION
+            value: "{{ .Values.caasVersion }}"
+          - name: CLOUD_PROVIDER
+            value: "{{ .Values.cloudProvider }}"
+          - name: CLOUD_REGION
+            value: "{{ .Values.cloudRegion }}"
+          - name: CLOUD_ACCOUNT
+            value: {{ .Values.cloudAccount | quote }}
+          - name:  CUSTOMER_CLUSTER_ID
+            value: {{ .Values.clusterID }}
+          - name:  DATABASE_ID
+            value: {{ .Values.databaseID | default "missing" }}
+          - name:  DATACENTER_ID
+            value: {{ .Values.clusterID }}
+          - name:  DC_NAME
+            value: {{ .Values.dcName }}
+          - name:  ENABLE_STARGATE
+            value: "{{ .Values.enableStargate }}"
+          - name: SECURE_BUNDLE_STARGATE
+            value: "{{ .Values.secureBundleStargate | default "true" }}"
+          # TODO This should work with AWS_DEFAULT_REGION, but some AWS SDK we are using expects AWS_REGION
+          - name: AWS_REGION
+            value: "{{ .Values.sqsAWSRegion }}"
+          # TODO This should NOT change with the region of the cluster, can go away when we use cloud platform's secret manager
+          - name: AWS_DEFAULT_REGION
+            value: "{{ .Values.sqsAWSRegion }}" 
+          - name: SQS_REGION
+            value: "{{ .Values.sqsCommandRegion }}"
+          - name: SQS_URL
+            value: "{{ .Values.sqsCommandURL }}"
+          - name: RESPONSE_SQS_REGION
+            value: "{{ .Values.sqsResponseRegion }}"
+          - name: RESPONSE_SQS_URL
+            value: "{{ .Values.sqsResponseURL }}"
+          - name: HEALTHCHECK_SQS_REGION
+            value: "{{ .Values.sqsHealthcheckRegion }}"
+          - name: HEALTHCHECK_SQS_URL
+            value: "{{ .Values.sqsHealthcheckURL }}"
+          - name: MGMT_API_CERT_PATH
+            value: "/etc/certs/mgmt"
+          - name:  ENABLE_ADVANCED_WORKLOADS
+            value: "{{ .Values.enableAdvancedWorkloads }}"
+          - name:  ENABLE_AUTH_ASTRA_DSE
+            value: "{{ .Values.enableAuthAstraDse }}"
+          - name: SNI_PORT
+            value: "{{ .Values.cqlSNIPort }}"
+          securityContext:
+            runAsUser: 65534
+            runAsGroup: 65534
+            privileged: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+              - ALL
+      volumes:
+      - name: remote-dcs
+        configMap:
+          name: remote-dcs
+          optional: true
+      - name: management-api-client-certs-volume
+        secret:
+          secretName: mgmt-api-client-credentials
+      - secret:
+          secretName: web-cert
+        name: web-cert
+      - secret:
+          secretName: cql-cert
+        name: cql-cert
+      - name: dse-credentials
+        secret:
+          defaultMode: 0400
+          secretName: dse-credentials
+          items:
+            - key: username
+              path: username
+            - key: password
+              path: password
+            - key: SLA_USERNAME
+              path: SLA_USERNAME
+            - key: SLA_PASSWORD
+              path: SLA_PASSWORD
+            - key: DATA_ENDPOINT_USERNAME
+              path: DATA_ENDPOINT_USERNAME
+            - key: DATA_ENDPOINT_PASSWORD
+              path: DATA_ENDPOINT_PASSWORD
+      - name: sqs-credentials
+        secret:
+          defaultMode: 0400
+          secretName: sqs-credentials
+          items:
+            - key: AWS_ACCESS_KEY_ID
+              path: AWS_ACCESS_KEY_ID
+            - key: AWS_SECRET_ACCESS_KEY
+              path: AWS_SECRET_ACCESS_KEY
+      - name: tmpdir
+        emptyDir: {}
+      securityContext:
+        fsGroup: 65534

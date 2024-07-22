@@ -1,0 +1,546 @@
+# Default values for fluent-bit.
+
+# kind -- DaemonSet or Deployment
+kind: DaemonSet
+
+# replicaCount -- Only applicable if kind=Deployment
+replicaCount: 1
+
+image:
+  repository: registry.cloud-tools.datastax.com/cloud-services-platform/fluent-bit
+  # Overrides the image tag whose default is {{ .Chart.AppVersion }}
+  tag: "2.0.6"
+  pullPolicy: Always
+
+testFramework:
+  enabled: true
+  image:
+    repository: busybox
+    pullPolicy: Always
+    tag: latest
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: "fluent-bit-observability"
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: fluent-bit-observability
+
+rbac:
+  create: true
+  nodeAccess: true
+
+# Configure podsecuritypolicy
+# Ref: https://kubernetes.io/docs/concepts/policy/pod-security-policy/
+# from Kubernetes 1.25, PSP is deprecated
+# See: https://kubernetes.io/blog/2022/08/23/kubernetes-v1-25-release/#pod-security-changes
+# We automatically disable PSP if Kubernetes version is 1.25 or higher
+podSecurityPolicy:
+  create: false
+  annotations: {}
+
+openShift:
+  # Sets Openshift support
+  enabled: false
+  # Creates SCC for Fluent-bit when Openshift support is enabled
+  securityContextConstraints:
+    create: true
+    annotations: {}
+
+podSecurityContext: {}
+#   fsGroup: 2000
+
+hostNetwork: true
+dnsPolicy: ClusterFirstWithHostNet
+
+dnsConfig: {}
+#   nameservers:
+#     - 1.2.3.4
+#   searches:
+#     - ns1.svc.cluster-domain.example
+#     - my.dns.search.suffix
+#   options:
+#     - name: ndots
+#       value: "2"
+#     - name: edns0
+
+hostAliases: []
+#   - ip: "1.2.3.4"
+#     hostnames:
+#     - "foo.local"
+#     - "bar.local"
+
+securityContext: {}
+#   capabilities:
+#     drop:
+#     - ALL
+#   readOnlyRootFilesystem: true
+#   runAsNonRoot: true
+#   runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 2020
+  loadBalancerClass:
+  loadBalancerSourceRanges: []
+  labels: {}
+  # nodePort: 30020
+  # clusterIP: 172.16.10.1
+  annotations: {}
+#   prometheus.io/path: "/api/v1/metrics/prometheus"
+#   prometheus.io/port: "2020"
+#   prometheus.io/scrape: "true"
+
+serviceMonitor:
+  enabled: false
+#   namespace: monitoring
+#   interval: 10s
+#   scrapeTimeout: 10s
+#   jobLabel: fluentbit
+#   selector:
+#    prometheus: my-prometheus
+#  ## metric relabel configs to apply to samples before ingestion.
+#  ##
+#  metricRelabelings:
+#    - sourceLabels: [__meta_kubernetes_service_label_cluster]
+#      targetLabel: cluster
+#      regex: (.*)
+#      replacement: ${1}
+#      action: replace
+#  ## relabel configs to apply to samples after ingestion.
+#  ##
+#  relabelings:
+#    - sourceLabels: [__meta_kubernetes_pod_node_name]
+#      separator: ;
+#      regex: ^(.*)$
+#      targetLabel: nodename
+#      replacement: $1
+#      action: replace
+#  scheme: ""
+#  tlsConfig: {}
+
+  ## Beare in mind if youn want to collec metrics from a different port
+  ## you will need to configure the new ports on the extraPorts property.
+  additionalEndpoints: []
+  # - port: metrics
+  #   path: /metrics
+  #   interval: 10s
+  #   scrapeTimeout: 10s
+  #   scheme: ""
+  #   tlsConfig: {}
+  #   # metric relabel configs to apply to samples before ingestion.
+  #   #
+  #   metricRelabelings:
+  #     - sourceLabels: [__meta_kubernetes_service_label_cluster]
+  #       targetLabel: cluster
+  #       regex: (.*)
+  #       replacement: ${1}
+  #       action: replace
+  #   # relabel configs to apply to samples after ingestion.
+  #   #
+  #   relabelings:
+  #     - sourceLabels: [__meta_kubernetes_pod_node_name]
+  #       separator: ;
+  #       regex: ^(.*)$
+  #       targetLabel: nodename
+  #       replacement: $1
+  #       action: replace
+
+prometheusRule:
+  enabled: false
+#   namespace: ""
+#   additionalLabels: {}
+#   rules:
+#   - alert: NoOutputBytesProcessed
+#     expr: rate(fluentbit_output_proc_bytes_total[5m]) == 0
+#     annotations:
+#       message: |
+#         Fluent Bit instance {{ $labels.instance }}'s output plugin {{ $labels.name }} has not processed any
+#         bytes for at least 15 minutes.
+#       summary: No Output Bytes Processed
+#     for: 15m
+#     labels:
+#       severity: critical
+
+dashboards:
+  enabled: false
+  labelKey: grafana_dashboard
+  annotations: {}
+  namespace: ""
+
+lifecycle: {}
+  # preStop:
+  #   exec:
+  #     command: ["/bin/sh", "-c", "sleep 20"]
+
+livenessProbe:
+  httpGet:
+    path: /
+    port: http
+
+readinessProbe:
+  httpGet:
+    path: /api/v1/health
+    port: http
+
+resources: {}
+#   limits:
+#     cpu: 100m
+#     memory: 128Mi
+#   requests:
+#     cpu: 100m
+#     memory: 128Mi
+
+## only available if kind is Deployment
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts: []
+  # - host: fluent-bit.example.tld
+  extraHosts: []
+  # - host: fluent-bit-extra.example.tld
+      ## specify extraPort number
+  #   port: 5170
+  tls: []
+  #  - secretName: fluent-bit-example-tld
+  #    hosts:
+  #      - fluent-bit.example.tld
+
+## only available if kind is Deployment
+autoscaling:
+  vpa:
+    enabled: false
+
+    annotations: {}
+
+    # List of resources that the vertical pod autoscaler can control. Defaults to cpu and memory
+    controlledResources: []
+
+    # Define the max allowed resources for the pod
+    maxAllowed: {}
+    # cpu: 200m
+    # memory: 100Mi
+    # Define the min allowed resources for the pod
+    minAllowed: {}
+    # cpu: 200m
+    # memory: 100Mi
+
+    updatePolicy:
+      # Specifies whether recommended updates are applied when a Pod is started and whether recommended updates
+      # are applied during the life of a Pod. Possible values are "Off", "Initial", "Recreate", and "Auto".
+      updateMode: Auto
+
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 75
+#  targetMemoryUtilizationPercentage: 75
+   ## see https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale-walkthrough/#autoscaling-on-multiple-metrics-and-custom-metrics
+  customRules: []
+#     - type: Pods
+#       pods:
+#         metric:
+#           name: packets-per-second
+#         target:
+#           type: AverageValue
+#           averageValue: 1k
+    ## see https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/#support-for-configurable-scaling-behavior
+  behavior: {}
+#      scaleDown:
+#        policies:
+#          - type: Pods
+#            value: 4
+#            periodSeconds: 60
+#          - type: Percent
+#            value: 10
+#            periodSeconds: 60
+
+## only available if kind is Deployment
+podDisruptionBudget:
+  enabled: false
+  annotations: {}
+  maxUnavailable: "30%"
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+labels: {}
+
+annotations: {}
+
+podAnnotations: {}
+
+podLabels: {}
+
+## How long (in seconds) a pods needs to be stable before progressing the deployment
+##
+minReadySeconds:
+
+## How long (in seconds) a pod may take to exit (useful with lifecycle hooks to ensure lb deregistration is done)
+##
+terminationGracePeriodSeconds:
+
+priorityClassName: ""
+
+env: []
+#  - name: FOO
+#    value: "bar"
+
+# The envWithTpl array below has the same usage as "env", but is using the tpl function to support templatable string.
+# This can be useful when you want to pass dynamic values to the Chart using the helm argument "--set <variable>=<value>"
+# https://helm.sh/docs/howto/charts_tips_and_tricks/#using-the-tpl-function
+envWithTpl: []
+#  - name: FOO_2
+#    value: "{{ .Values.foo2 }}"
+#
+# foo2: bar2
+
+envFrom: []
+
+extraContainers: []
+#   - name: do-something
+#     image: busybox
+#     command: ['do', 'something']
+
+flush: 1
+
+metricsPort: 2020
+
+extraPorts: []
+#   - port: 5170
+#     containerPort: 5170
+#     protocol: TCP
+#     name: tcp
+#     nodePort: 30517
+
+extraVolumes: []
+
+extraVolumeMounts: []
+
+updateStrategy: {}
+#   type: RollingUpdate
+#   rollingUpdate:
+#     maxUnavailable: 1
+
+# Make use of a pre-defined configmap instead of the one templated here
+existingConfigMap: ""
+
+networkPolicy:
+  enabled: false
+#   ingress:
+#     from: []
+
+luaScripts: {}
+
+containerLogFormat: "containerd"
+
+## https://docs.fluentbit.io/manual/administration/configuring-fluent-bit/classic-mode/configuration-file
+config:
+  service: |
+    [SERVICE]
+        Daemon Off
+        Flush {{ .Values.flush }}
+        Log_Level {{ .Values.logLevel }}
+        Parsers_File parsers.conf
+        Parsers_File custom_parsers.conf
+        HTTP_Server On
+        HTTP_Listen 0.0.0.0
+        HTTP_Port {{ .Values.metricsPort }}
+        Health_Check On
+        storage.path /var/log/fluent-bit/
+        storage.sync normal
+        storage.checksum Off
+        storage.backlog.mem_limit 256M
+        storage.metrics On
+  inputs: |
+    # https://docs.fluentbit.io/manual/pipeline/inputs/tail
+    {{- if .Values.log4jLogs}}
+    # logs that use log4j format
+    [INPUT]
+        Name tail
+        Path {{ join ", " .Values.log4jLogs }}
+        {{- if .Values.blocklistLogs }}
+        Exclude_Path {{ join ", " .Values.blocklistLogs}}
+        {{- end }}
+        multiline.parser multiline_log4j
+        Tag kube.*
+        Mem_Buf_Limit 128MB
+        Skip_Long_Lines On
+    {{- end }}
+    # logs in all other formats
+    [INPUT]
+        Name tail
+        Path /var/log/containers/*.log
+        {{- if or .Values.log4jLogs .Values.blocklistLogs }}
+        # any logs added the log4j input's path should be added to this input's exclude_path
+        Exclude_Path {{ join ", " (concat .Values.log4jLogs .Values.blocklistLogs) }}
+        {{- end }}
+        {{- if eq .Values.containerLogFormat "containerd" }}
+        multiline.parser cri
+        {{- else }}
+        multiline.parser docker
+        {{- end }}
+        Tag kube.*
+        Mem_Buf_Limit 128MB
+        Skip_Long_Lines On
+    # https://docs.fluentbit.io/manual/pipeline/inputs/systemd
+    # kubelet logs
+    [INPUT]
+        Name systemd
+        Tag host.*
+        Systemd_Filter _SYSTEMD_UNIT=kubelet.service
+        Read_From_Tail On
+
+  # https://docs.fluentbit.io/manual/pipeline/parsers
+  # https://docs.fluentbit.io/manual/administration/configuring-fluent-bit/multiline-parsing
+  customParsers: |
+    [MULTILINE_PARSER]
+        name          multiline_log4j
+        type          regex
+        {{- if eq .Values.containerLogFormat "containerd" }}
+        parser        cri
+        key_content   message
+        {{- else }}
+        parser        docker
+        key_content   log
+        {{- end }}
+        flush_timeout 1000
+        rule          "start_state" "/^({{ .Values.multilineRegex }}).*/"     "cont"
+        rule          "cont"        "/^(?!({{ .Values.multilineRegex }})).*/" "cont"
+  filters: |
+    # Enrich with k8s metadata
+    # https://docs.fluentbit.io/manual/pipeline/filters/kubernetes
+    [FILTER]
+        Name kubernetes
+        Match kube.*
+        # We are going to let Vector take care of log parsing
+        Merge_Log Off 
+        Keep_Log On
+        K8S-Logging.Parser On
+        K8S-Logging.Exclude On
+        Use_Kubelet true
+        Buffer_Size 0
+        {{- if eq .Values.cloudProvider "azure" }}
+        # temporary fix for Azure TLS issue
+        # https://github.com/fluent/fluent-bit/issues/3077
+        tls.verify Off
+        {{- end }}
+    # Add in info on our local platform
+    # https://docs.fluentbit.io/manual/pipeline/filters/record-modifier
+    [FILTER]
+        Name record_modifier
+        Match *
+        {{- if .Values.cloudProvider }}
+        Record cloud.provider {{ .Values.cloudProvider }}
+        {{- end }}
+        {{- if .Values.cloudRegion }}
+        Record cloud.region {{ .Values.cloudRegion }}
+        {{- end }}
+        {{- if .Values.cloudAccount }}
+        Record cloud.accountID {{ .Values.cloudAccount }}
+        {{- end }}
+        {{- if .Values.clusterID }}
+        Record cluster {{ .Values.clusterID }}
+        {{- end }}
+        Record plat_infra_cluster_env {{ .Values.shortEnv }}
+    # Drop filebeat logs
+    # https://docs.fluentbit.io/manual/pipeline/filters/grep
+    [FILTER]
+        Name grep
+        Match *
+        Exclude $kubernetes['labels']['k8s-app'] filebeat
+
+  # https://docs.fluentbit.io/manual/pipeline/outputs/forward
+  outputs: |
+    [OUTPUT]
+        Name          forward
+        Match         *
+        # update these to point to your vector instance
+        Host          {{ .Values.vector.host }} 
+        Port          {{ .Values.vector.port }} 
+        Retry_Limit   3
+
+  # This allows adding more files with arbitary filenames to /fluent-bit/etc by providing key/value pairs.
+  # The key becomes the filename, the value becomes the file content.
+  extraFiles: {}
+volumeMounts:
+  - name: config
+    mountPath: /fluent-bit/etc/fluent-bit.conf
+    subPath: fluent-bit.conf
+  - name: config
+    mountPath: /fluent-bit/etc/custom_parsers.conf
+    subPath: custom_parsers.conf
+
+daemonSetVolumes:
+  - name: varlog
+    hostPath:
+      path: /var/log
+  - name: varlibdockercontainers
+    hostPath:
+      path: /var/lib/docker/containers
+  - name: etcmachineid
+    hostPath:
+      path: /etc/machine-id
+      type: File
+
+daemonSetVolumeMounts:
+  - name: varlog
+    mountPath: /var/log
+  - name: varlibdockercontainers
+    mountPath: /var/lib/docker/containers
+    readOnly: true
+  - name: etcmachineid
+    mountPath: /etc/machine-id
+    readOnly: true
+
+args: []
+
+command: []
+
+# This supports either a structured array or a templatable string
+initContainers: []
+
+# Array mode
+# initContainers:
+#   - name: do-something
+#     image: bitnami/kubectl:1.22
+#     command: ['kubectl', 'version']
+
+# String mode
+# initContainers: |-
+#   - name: do-something
+#     image: bitnami/kubectl:{{ .Capabilities.KubeVersion.Major }}.{{ .Capabilities.KubeVersion.Minor }}
+#     command: ['kubectl', 'version']
+
+logLevel: info
+
+# Config for where Vector lives (where we ship logs to)
+vector:
+  host: ""
+  port: 24224
+
+# list of logs that are in log4j format
+log4jLogs:
+  - /var/log/containers/caas*cassandra*.log
+  - /var/log/containers/caas*server-system-logger*.log
+  - /var/log/containers/stargate*.log
+
+# Logs that have proven excessively spammy and overloading splunk, so are no longer collected
+blocklistLogs: []
+
+# Regex indicating when multiline event should begin
+multilineRegex: 'DEBUG|INFO|WARN|ERROR|FATAL|TRACE|\['
+
+cloudProvider: ""
+cloudRegion: ""
+cloudAccount: ""
+clusterID: ""
+shortEnv: ""

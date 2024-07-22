@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: stargate
+  labels:
+    app: stargate
+spec:
+  ports:
+  - name: http-healmetr
+    port: 8084
+    protocol: TCP
+    targetPort: 8084
+  - name: http-graphql
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  - name: http-auth
+    port: 8081
+    protocol: TCP
+    targetPort: 8081
+  - name: http-rest
+    port: 8082
+    protocol: TCP
+    targetPort: 8082
+  - name: http-schemaless
+    port: 8090
+    protocol: TCP
+    targetPort: 8090
+  - name: native
+    port: 9042
+    protocol: TCP
+    targetPort: 9042
+  - name: native-sni-new
+    port: 29044
+    protocol: TCP
+    targetPort: {{ .Values.cqlSNIPort }}
+  - name: native-rr-new
+    port: 29042
+    protocol: TCP
+    targetPort: {{ .Values.cqlRoundRobinPort }}
+  selector:
+    app: stargate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stargate-all
+  labels:
+    app: stargate
+spec:
+  publishNotReadyAddresses: true
+  clusterIP: None
+  selector:
+    app: stargate

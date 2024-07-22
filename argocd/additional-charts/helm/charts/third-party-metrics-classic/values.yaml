@@ -1,0 +1,402 @@
+#this is the values file for 3pm classic
+clusterID: ""
+vector:
+  name: vector-metrics-agent
+  labels: {}
+    # - prometheus.io/scrape: true
+    # - prometheus.io/path: "/"
+    # - prometheus.io/port: 9598
+ 
+deployment:
+  replicas: 2
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: 10
+  podManagementPolicy: OrderedReady
+  strategy: 
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+
+volumeClaimTemplate:
+  accessModes: [ "ReadWriteOnce" ]
+  #storageClassName: {{ .Values.diskClass }}
+  resources:
+    requests:
+      storage: 100Gi
+
+persistence:
+  enabled: true
+  annotations: {}
+
+images:
+  vector:
+    repository: registry.cloud-tools.datastax.com/cloud-services-platform/vector
+    tag: 0.32.1-debian
+    pullPolicy: IfNotPresent
+  sidecar:
+    repository: registry.cloud-tools.datastax.com/cloud-services-platform/kopf-k8s-sidecar
+    tag: 1.4.1
+    pullPolicy: Always
+      
+resources:
+  limits:
+    cpu: 5000m
+    memory: 5.0Gi
+  requests:
+    cpu: 2000m
+    memory: 1.0Gi
+
+configBaseDir: /var/tmp 
+# victoria metrics agent, feeds alert recording rules to vector and back to victoria
+vmagent:
+  resources:
+    requests:
+      cpu: 2000m
+      memory: 8Gi
+  externalLabels: {}
+  remoteWriteUrls:
+    - http://vector-metrics-agent:9042
+  extraArgs:
+    remoteWrite.maxDiskUsagePerURL: 100MB
+    remoteWrite.queues: 2
+    remoteWrite.sendTimeout: 2m
+    remoteWrite.maxBlockSize: 100MB
+    remoteWrite.flushInterval: 1s
+    remoteWrite.showURL: true
+  service:
+    enabled: true
+  config:
+    scrape_configs: []
+  persistence:
+    enabled: true
+    size: 10Gi
+  replicaCount: 1
+  statefulset:
+    enabled: false
+    replicationFactor: 1
+  podSecurityContext:
+    fsGroup: 65534
+  securityContext:
+    runAsUser: 65534
+    runAsGroup: 65534
+    privileged: false
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+      - ALL
+# victoria metrics alert server; runs our recording rules
+vmalert:
+  rbac:
+    namespaced: true
+  server:
+    resources:
+      requests:
+        cpu: 200m
+        memory: 500Mi
+    replicaCount: 1
+    podSecurityContext:
+      fsGroup: 65534
+    securityContext:
+      runAsUser: 65534
+      runAsGroup: 65534
+      privileged: false
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop:
+        - ALL
+    config:
+      alerts:
+        groups: 
+          # *** BEGIN Cluster Overview [GROUP] ***
+          # --- BEGIN Nodes ---
+          - name: nodes_up
+            interval: 1m
+            rules:
+              - record: nodes_up
+                expr: count(dse_compaction_completed_tasks{} >= 0) or vector(0)
+          - name: nodes_down
+            interval: 1m
+            rules:
+              - record: nodes_down
+                expr: count(absent(sum(rate(dse_compaction_completed_tasks{}[2m])))) OR vector(0)
+          # --- END Nodes ---
+          # --- BEGIN Compactions ---
+          - name: compactions_rate1m
+            interval: 1m
+            rules:
+              - record: compactions:rate1m
+                expr: sum(irate(dse_compaction_completed_tasks{}[1m]))
+          - name: compactions_rate5m
+            interval: 1m
+            rules:
+              - record: compactions:rate5m
+                expr: sum(irate(dse_compaction_completed_tasks{}[5m]))
+          # --- END Compactions ---
+          # --- BEGIN Requests ---
+          - name: requests_rate1m 
+            interval: 1m
+            rules:
+              - record: requests:rate1m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_Read_count[1m])) + sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_Write_count[1m])) + sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_CASRead_count[1m])) + sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_CASWrite_count[1m])) + sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_RangeSlice_count[1m])) + sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_ViewWrite[1m]))
+          - name: requests_rate5m 
+            interval: 1m
+            rules:
+              - record: requests:rate5m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_Read_count[5m])) + sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_Write_count[5m])) + sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_CASRead_count[5m])) + sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_CASWrite_count[5m])) + sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_RangeSlice_count[5m])) + sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_ViewWrite[5m]))
+          # --- END Requests ---
+          # --- BEGIN Dropped Messages ---
+          - name: dropped_msg_rate1m 
+            interval: 1m
+            rules:
+              - record: dropped_msg:rate1m
+                expr: sum(irate(dse_table_dropped_mutations_total{}[1m]))
+          - name: dropped_msg_rate5m 
+            interval: 1m
+            rules:
+              - record: dropped_msg:rate5m
+                expr: sum(irate(dse_table_dropped_mutations_total{}[5m]))
+          # --- END Dropped Messages ---
+          # --- BEGIN Client Info ---
+          - name: clients_connected_sum
+            interval: 1m
+            rules:
+              - record: clients_connected_sum
+                expr: sum(cql_org_apache_cassandra_metrics_Client_connectedNativeClients)
+          - name: client_timeouts_sum_rate1m
+            interval: 1m
+            rules:
+              - record: client_timeouts_sum:rate1m
+                expr: sum(irate(dse_client_request_timeouts_total{}[1m])) 
+          - name: client_timeouts_sum_rate5m
+            interval: 1m
+            rules:
+              - record: client_timeouts_sum:rate5m
+                expr: sum(irate(dse_client_request_timeouts_total{}[5m])) 
+          # --- END Client Info ---
+          # --- BEGIN Storage ***
+          - name: storage_total_hints
+            interval: 1m
+            rules:
+              - record: storage_total_hints
+                expr: sum(dse_storage_hints_on_disk_total{})
+          - name: storage_live_data_size
+            interval: 1m
+            rules:
+              - record: storage_live_data_size
+                expr: sum(dse_table_live_disk_space_used_total{})
+          # --- END Storage ***
+          # *** END Cluster Overview [GROUP] ***
+          # *** BEGIN Coordinator Metrics [GROUP] ***
+          - name: clients_connected
+            interval: 1m
+            rules:
+              - record: clients_connected
+                expr: cql_org_apache_cassandra_metrics_Client_connectedNativeClients
+          # --- BEGIN Client Timeouts ---
+          - name: client_timeouts_read_total_rate1m
+            interval: 1m
+            rules:
+              - record: client_timeouts_read_total:rate1m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Timeouts_Read_total[1m])) by (instance)
+          - name: client_timeouts_read_total_rate5m
+            interval: 1m
+            rules:
+              - record: client_timeouts_read_total:rate5m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Timeouts_Read_total[5m])) by (instance)
+          - name: client_timeouts_write_total_rate1m
+            interval: 1m
+            rules:
+              - record: client_timeouts_write_total:rate1m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Timeouts_Write_total[1m])) by (instance)
+          - name: client_timeouts_write_total_rate5m
+            interval: 1m
+            rules:
+              - record: client_timeouts_write_total:rate5m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Timeouts_Write_total[5m])) by (instance)
+          - name: client_timeouts_cas_read_total_rate1m
+            interval: 1m
+            rules:
+              - record: client_timeouts_cas_read_total:rate1m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Timeouts_CASRead_total[1m])) by (instance)
+          - name: client_timeouts_cas_read_total_rate5m
+            interval: 1m
+            rules:
+              - record: client_timeouts_cas_read_total:rate5m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Timeouts_CASRead_total{}[5m]))
+          - name: client_timeouts_cas_write_total_rate1m
+            interval: 1m
+            rules:
+              - record: client_timeouts_cas_write_total:rate1m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Timeouts_CASWrite_total{}[1m]))
+          - name: client_timeouts_cas_write_total_rate5m
+            interval: 1m
+            rules:
+              - record: client_timeouts_cas_write_total:rate5m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Timeouts_CASWrite_total{}[5m]))
+          - name: client_timeouts_view_write_total_rate1m
+            interval: 1m
+            rules:
+              - record: client_timeouts_view_write_total:rate1m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Timeouts_ViewWrite_total{}[1m]))
+          - name: client_timeouts_view_write_total_rate5m
+            interval: 1m
+            rules:
+              - record: client_timeouts_view_write_total:rate5m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Timeouts_ViewWrite_total{}[5m]))
+          - name: client_timeouts_range_slice_total_rate1m
+            interval: 1m
+            rules:
+              - record: client_timeouts_range_slice_total:rate1m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Timeouts_RangeSlice_total{}[1m]))
+          - name: client_timeouts_range_slice_total_rate5m
+            interval: 1m
+            rules:
+              - record: client_timeouts_range_slice_total:rate5m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Timeouts_RangeSlice_total{}[5m]))
+          # --- END Client Timeouts ---
+          # --- BEGIN Requests Served ---
+          - name: requests_latency_read_rate1m
+            interval: 1m
+            rules:
+              - record: requests_latency_read:rate1m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_Read_count[1m]))
+          - name: requests_latency_read_rate5m
+            interval: 1m
+            rules:
+              - record: requests_latency_read:rate5m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_Read_count[5m]))
+          - name: requests_latency_write_rate1m
+            interval: 1m
+            rules:
+              - record: requests_latency_write:rate1m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_Write_count[1m]))
+          - name: requests_latency_write_rate5m
+            interval: 1m
+            rules:
+              - record: requests_latency_write:rate5m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_Write_count[5m]))
+          - name: requests_latency_casread_rate1m
+            interval: 1m
+            rules:
+              - record: requests_latency_casread:rate1m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_CASRead_count[1m]))
+          - name: requests_latency_casread_rate5m
+            interval: 1m
+            rules:
+              - record: requests_latency_casread:rate5m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_CASRead_count[5m]))
+          - name: requests_latency_caswrite_rate1m
+            interval: 1m
+            rules:
+              - record: requests_latency_caswrite:rate1m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_CASWrite_count[1m]))
+          - name: requests_latency_caswrite_rate5m
+            interval: 1m
+            rules:
+              - record: requests_latency_caswrite:rate5m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_CASWrite_count[5m]))
+          - name: requests_latency_viewwrite_rate1m
+            interval: 1m
+            rules:
+              - record: requests_latency_viewwrite:rate1m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_ViewWrite_count[1m]))
+          - name: requests_latency_viewwrite_rate5m
+            interval: 1m
+            rules:
+              - record: requests_latency_viewwrite:rate5m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_ViewWrite_count[5m]))
+          - name: requests_latency_rangeslice_rate1m
+            interval: 1m
+            rules:
+              - record: requests_latency_range_slice:rate1m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_RangeSlice_count[1m]))
+          - name: requests_latency_rangeslice_rate5m
+            interval: 1m
+            rules:
+              - record: requests_latency_range_slice:rate5m
+                expr: sum(irate(persistence_dse_68_org_apache_cassandra_metrics_ClientRequest_Latency_RangeSlice_count[5m]))
+          # --- END Requests Served ---
+          # --- BEGIN Compactions ---
+          - name: table_compaction_bytes_written_rate1m
+            interval: 1m
+            rules:
+              - record: table_compaction_bytes_written:rate1m
+                expr: sum(irate(dse_table_compaction_bytes_written_total{}[1m])) by (cluster)
+          - name: table_compaction_bytes_written_rate5m
+            interval: 1m
+            rules:
+              - record: table_compaction_bytes_written:rate5m
+                expr: sum(irate(dse_table_compaction_bytes_written_total{}[5m])) by (cluster)
+          - name: table_pending_compactions_rate1m
+            interval: 1m
+            rules:
+              - record: table_pending_compactions:rate1m
+                expr: sum(irate(dse_table_pending_compactions{}[1m])) by (cluster)
+          - name: table_pending_compactions_rate5m
+            interval: 1m
+            rules:
+              - record: table_pending_compactions:rate5m
+                expr: sum(irate(dse_table_pending_compactions{}[5m])) by (cluster)
+          - name: table_compaction_completed_tasks_rate1m
+            interval: 1m
+            rules:
+              - record: table_compaction_completed_tasks:rate1m
+                expr: sum(irate(dse_table_pending_compactions{}[1m])) by (cluster)
+          - name: table_compaction_completed_tasks_rate5m
+            interval: 1m
+            rules:
+              - record: table_compaction_completed_tasks:rate5m
+                expr: sum(irate(dse_table_pending_compactions{}[5m])) by (cluster)
+          # --- END Compactions ---
+          # --- BEGIN Memtable Space ---
+          - name: memtable_off_heap_size
+            interval: 1m
+            rules:
+                - record: memtable_off_heap_size
+                  expr: sum(dse_table_memtable_off_heap_size{}) by (cluster)
+          - name: memtable_on_heap_size
+            interval: 1m
+            rules:
+                - record: memtable_on_heap_size
+                  expr: sum(dse_table_memtable_on_heap_size{}) by (cluster)
+          - name: memtable_live_data_size
+            interval: 1m
+            rules:
+                - record: memtable_live_data_size
+                  expr: sum(dse_table_memtable_live_data_size{}) by (cluster)
+          - name: memtable_flushes_idelta1m
+            interval: 1m
+            rules:
+              - record: memtable_flushes:idelta1m
+                expr: sum by (cluster) (idelta(dse_table_memtable_flushes[1m]))
+          - name: memtable_pending_flushes_idelta5m
+            interval: 1m
+            rules:
+              - record: memtable_pending_flushes:idelta5m
+                expr: sum(idelta(dse_table_memtable_pending_flushes{}[5m])) by (cluster)
+          # --- END Memtable Space ---
+          # --- BEGIN Large Partitions ---
+          - name: table_max_partition_size
+            interval: 1m
+            rules:
+              - record: table_max_partition_size
+                expr: sum by (instance, keyspace, table) (dse_table_max_partition_size{})
+          # --- END Large Partitions ---
+          # *** END Coordinator Metrics [GROUP] ***
+    alertmanager:
+      enabled: true
+    # note classic does not support VictoriaMetrics, so we collect from Prometheus.
+    datasource:
+      url: http://prometheus:9090
+    notifier:
+      alertmanager:
+        url: http://third-party-metrics-classic-vmalert-server
+    remote:
+      read:
+        url: http://prometheus:9090
+      write:
+        url: http://third-party-metrics-classic-vmagent:8429
+
+

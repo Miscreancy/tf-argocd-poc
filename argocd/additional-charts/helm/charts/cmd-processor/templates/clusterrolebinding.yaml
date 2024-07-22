@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ "cmd-processor-" }}{{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ "cmd-processor-" }}{{ .Release.Namespace }}
+subjects:
+- kind: ServiceAccount
+  name: cmd-processor
+  namespace: {{ .Release.Namespace }}

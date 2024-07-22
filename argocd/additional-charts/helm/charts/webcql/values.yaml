@@ -1,0 +1,14 @@
+clusterID: ""
+astraDatabaseVersion: "1.0.0"
+image: "cloud-ondemand/cqlsh-pod:latest"
+imagePullPolicy: IfNotPresent
+imagePullSecrets: "datastax.com"
+deploymentName: webcql
+deploymentReplicas: 1
+resources:
+  requests:
+    cpu: 25m
+    memory: 100Mi
+  limits:
+    cpu: 300m
+    memory: 100Mi

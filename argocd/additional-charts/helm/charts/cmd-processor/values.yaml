@@ -1,0 +1,41 @@
+# Default values for cmd-processor.
+
+deploymentReplicas: 1
+
+imagePullSecrets: []
+nameOverride: ""
+
+serviceAccount:
+  annotations: {}
+
+image: ""
+logLevel: ""
+env: ""
+caasVersion: ""
+cloudProvider: ""
+cloudRegion: ""
+cloudAccount: ""
+clusterID: ""
+sqsAWSRegion: "" 
+sqsCommandRegion: ""
+sqsCommandURL: ""
+sqsResponseRegion: ""
+sqsResponseURL: ""
+sqsHealthcheckRegion: ""
+sqsHealthcheckURL: ""
+sqsAWSAccessKeyID: ""
+sqsAWSSecretAccessKey: ""
+clientCert: ""
+clientKey: ""
+caCert: ""
+caKey: ""
+serverCert: ""
+serverKey: ""
+webCert: ""
+webKey: ""
+cqlSNIPort: 30044
+enableAdvancedWorkloads: ""
+enableAuthAstraDse: ""
+organizationID: ""
+databaseID: ""
+dseUsername: ""

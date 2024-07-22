@@ -1,0 +1,7 @@
+apiVersion: v2
+name: cmd-processor
+description: Helm chart for github.com/riptano/cloud-ondemand/cmd-processor
+
+type: application
+version: 0.1.0
+appVersion: 1.0.0

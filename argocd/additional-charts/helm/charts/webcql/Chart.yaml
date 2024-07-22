@@ -1,0 +1,4 @@
+apiVersion: v2
+name: webcql
+version: 1.0.0
+description: Helm chart for Astra for creating a webcql deployment with default settings.

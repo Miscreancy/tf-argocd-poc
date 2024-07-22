@@ -1,0 +1,37 @@
+kind: ConfigMap
+metadata:
+  name: fluent-bit-config-s3
+  namespace: {{ .Release.Namespace }}
+apiVersion: v1
+data:
+  fluent-bit.conf: |-
+    [SERVICE]
+        Flush          1
+        Daemon         Off
+        Log_Level      info
+        Parsers_File   parsers.conf
+
+    [INPUT]
+        Name        tcp
+        Listen      0.0.0.0
+        Port        5170
+        Chunk_Size  32
+        Buffer_Size 64
+        Format      none
+        Tag         classic-mr-egress
+
+    [INPUT]
+        Name        syslog
+        Mode        udp
+        Parser      syslog-rfc3164
+        Port        1514
+        Tag         classic-egress
+
+    [OUTPUT]
+        Name                         s3
+        Match                        *
+        bucket                       serverless-usage-{{.Values.ENV_DSCLOUD_ENVIRONMENT}}
+        region                       us-east-2
+        total_file_size              1M
+        upload_timeout               1m
+        use_put_object               On
